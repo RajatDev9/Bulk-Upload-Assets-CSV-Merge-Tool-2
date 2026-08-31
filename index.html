@@ -191,9 +191,6 @@
         <div class="label">Click or drop a file list here</div>
         <div class="sub">.csv or .txt export of the folder</div>
       </div>
-      <div class="or-divider">— or —</div>
-      <button class="secondary" id="folderBtn" style="width:100%;">📁 Select the assets folder</button>
-      <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none;">
       <div class="or-divider">— or paste filenames below —</div>
       <textarea id="assetsPaste" placeholder="AWEVS_CL04_CH01_AC01.zip&#10;AWEVS_CL04_CH01_VID_01.mp4&#10;..."></textarea>
     </div>
@@ -216,21 +213,12 @@
         <input type="text" id="pathPrefix" value="Interactivities\">
       </div>
       <div class="field">
-        <label for="pdfPathPrefix">Course Book PDF path prefix</label>
-        <input type="text" id="pdfPathPrefix" value="" placeholder="e.g. books/assets/pdf_file/">
-      </div>
-      <div class="field">
-        <label for="wbPathPrefix">Work Book PDF path prefix</label>
-        <input type="text" id="wbPathPrefix" value="" placeholder="defaults to Course Book prefix">
-      </div>
-      <div class="field">
         <label>Interactivity numbering</label>
         <div class="radiogroup">
           <label><input type="radio" name="numbering" value="keep" checked> Keep original numbers</label>
           <label><input type="radio" name="numbering" value="sequential"> Renumber sequentially</label>
         </div>
       </div>
-      
     </div>
     <div style="margin-top:18px;">
       <button class="primary" id="mergeBtn" disabled>Merge assets</button>
@@ -300,33 +288,9 @@ function detectBoolCase(rows, idx){
   return 'upper';
 }
 function parseAssetFilename(fn){
-  // CHxx pattern: Animation / Read Aloud / Interactivity (course book or workbook)
-  let m = fn.match(/CH(\d+)_(AC|VID)_?(RA)?(\d+)/i);
-  if (m) {
-    const prefixText = fn.slice(0, m.index);
-    const isWB = /WB/i.test(prefixText);
-    return { chapter: parseInt(m[1],10), kind: m[2].toUpperCase(), isRA: !!m[3], isWB, num: parseInt(m[4],10), filename: fn };
-  }
-
-  const base = fn.replace(/\.[a-zA-Z0-9]+$/, '');
-
-  // Work Book PDF style A: "WB_1.pdf", "WB1.pdf", "Workbook-01.pdf"
-  m = base.match(/^(?:WB|Work[_\- ]?[Bb]ook)[_\- ]?0*(\d+)$/i);
-  if (m) return { chapter: parseInt(m[1],10), kind: 'WB_PDF', isRA:false, isWB:true, num:1, filename: fn };
-
-  // Work Book PDF style B: "2 _WB_Halfway.pdf" (number, then WB marker, then title)
-  m = base.match(/^0*(\d+)\s*_?WB[_\s]/i);
-  if (m) return { chapter: parseInt(m[1],10), kind: 'WB_PDF', isRA:false, isWB:true, num:1, filename: fn };
-
-  // plain numeric course-book PDF: "1.pdf", "01.pdf"
-  m = base.match(/^0*(\d+)$/);
-  if (m) return { chapter: parseInt(m[1],10), kind: 'PDF', isRA:false, isWB:false, num:1, filename: fn };
-
-  // "Ch1.pdf" / "Chapter-01.pdf" style course-book PDF
-  m = base.match(/^Ch(?:apter)?[-_ ]?0*(\d+)$/i);
-  if (m) return { chapter: parseInt(m[1],10), kind: 'PDF', isRA:false, isWB:false, num:1, filename: fn };
-
-  return null;
+  const m = fn.match(/CH(\d+)_(AC|VID)_?(RA)?(\d+)/i);
+  if (!m) return null;
+  return { chapter: parseInt(m[1],10), kind: m[2].toUpperCase(), isRA: !!m[3], num: parseInt(m[4],10), filename: fn };
 }
 function detectClassFromFilenames(filenames){
   const counts = {};
@@ -346,7 +310,7 @@ function groupAssets(filenames){
   for (const fn of filenames){
     const p = parseAssetFilename(fn);
     if (!p) continue;
-    const key = `${p.chapter}|${p.kind}|${p.isRA}|${p.isWB}|${p.num}`;
+    const key = `${p.chapter}|${p.kind}|${p.isRA}|${p.num}`;
     const isDup = /\(\d+\)/.test(fn);
     const existing = byKey.get(key);
     if (!existing) byKey.set(key,p);
@@ -354,33 +318,26 @@ function groupAssets(filenames){
   }
   const byChapter = {};
   for (const p of byKey.values()){
-    if (!byChapter[p.chapter]) byChapter[p.chapter] = {AC:[],VID:[],VID_RA:[],PDF:[],WB_PDF:[],WB_AC:[],WB_VID:[],WB_VID_RA:[]};
-    const bucket = byChapter[p.chapter];
-    if (p.kind==='AC') (p.isWB ? bucket.WB_AC : bucket.AC).push(p);
-    else if (p.kind==='VID' && p.isRA) (p.isWB ? bucket.WB_VID_RA : bucket.VID_RA).push(p);
-    else if (p.kind==='PDF') bucket.PDF.push(p);
-    else if (p.kind==='WB_PDF') bucket.WB_PDF.push(p);
-    else (p.isWB ? bucket.WB_VID : bucket.VID).push(p);
+    if (!byChapter[p.chapter]) byChapter[p.chapter] = {AC:[],VID:[],VID_RA:[]};
+    if (p.kind==='AC') byChapter[p.chapter].AC.push(p);
+    else if (p.kind==='VID' && p.isRA) byChapter[p.chapter].VID_RA.push(p);
+    else byChapter[p.chapter].VID.push(p);
   }
-  for (const ch in byChapter){
-    ['AC','VID','WB_AC','WB_VID'].forEach(k=>byChapter[ch][k].sort((a,b)=>a.num-b.num));
-  }
+  for (const ch in byChapter){ byChapter[ch].AC.sort((a,b)=>a.num-b.num); byChapter[ch].VID.sort((a,b)=>a.num-b.num); }
   return byChapter;
 }
-function buildNewRow(colCount, idx, boolCase, name, groupName, url, opts){
-  opts = opts || {};
-  const T = boolCase==='lower' ? 'true' : 'TRUE';
+function buildNewRow(colCount, idx, boolCase, name, groupName, url){
   const F = boolCase==='lower' ? 'false' : 'FALSE';
   const row = new Array(colCount).fill('');
   row[idx.rowType]='chapter_assets';
   if (idx.name>=0) row[idx.name]=name;
   if (idx.groupName>=0) row[idx.groupName]=groupName;
   if (idx.url>=0) row[idx.url]=url;
-  if (idx.actionEnabled>=0) row[idx.actionEnabled]=opts.actionEnabled || 'VIEW';
+  if (idx.actionEnabled>=0) row[idx.actionEnabled]='VIEW';
   if (idx.allowTo>=0) row[idx.allowTo]='BOTH';
   if (idx.isAllowToDemo>=0) row[idx.isAllowToDemo]=F;
-  if (idx.isCourseBook>=0) row[idx.isCourseBook]=opts.isCourseBook ? T : F;
-  if (idx.isWorkBook>=0) row[idx.isWorkBook]=opts.isWorkBook ? T : F;
+  if (idx.isCourseBook>=0) row[idx.isCourseBook]=F;
+  if (idx.isWorkBook>=0) row[idx.isWorkBook]=F;
   if (idx.isVisibleInPageButton>=0) row[idx.isVisibleInPageButton]=F;
   if (idx.isConvertToTopic>=0) row[idx.isConvertToTopic]=F;
   if (idx.isRemove>=0) row[idx.isRemove]=F;
@@ -392,110 +349,32 @@ function mergeAssets(csvRows, byChapter, opts){
   ['isbn','rowType','sequence','name','groupName','url','actionEnabled','allowTo','isAllowToDemo','isCourseBook','isWorkBook','isVisibleInPageButton','pageNo','recordType','isConvertToTopic','isRemove'].forEach(k=>idx[k]=header.indexOf(k));
   const boolCase = detectBoolCase(csvRows.slice(1), idx.isCourseBook>=0?idx.isCourseBook:idx.isVisibleInPageButton);
   const prefix = opts.pathPrefix || 'Interactivities\\';
-  const pdfPrefix = opts.pdfPathPrefix != null ? opts.pdfPathPrefix : prefix;
-  const wbPrefix = opts.wbPathPrefix != null ? opts.wbPathPrefix : pdfPrefix;
-  const folderStyle = !!opts.folderStyleInteractivity; // Interactivity url = prefix + basename(no ext) + /index.html
-
-  function interactivityUrl(basePrefix, filename){
-    if (!folderStyle) return basePrefix + filename;
-    const noExt = filename.replace(/\.[a-zA-Z0-9]+$/, '');
-    return basePrefix + noExt + '/index.html';
-  }
-
-  // Pass 1: find which chapters already have "Course Book" / "Work Book" chapter_assets rows
-  const hasCourseBook = new Set();
-  const hasWorkBook = new Set();
-  {
-    let cur = null;
-    for (let r=1;r<csvRows.length;r++){
-      const row = csvRows[r];
-      if ((row[idx.rowType]||'').trim()==='chapter') cur = parseInt(row[idx.sequence],10);
-      else if ((row[idx.rowType]||'').trim()==='chapter_assets' && cur!=null) {
-        const nm = (row[idx.name]||'').trim();
-        if (nm==='Course Book') hasCourseBook.add(cur);
-        if (nm==='Work Book') hasWorkBook.add(cur);
-      }
-    }
-  }
-
-  function insertChapterAssetRows(out, d){
-    const vids = d.VID;
-    if (vids.length===1) out.push(buildNewRow(header.length,idx,boolCase,'Animation','Animation',prefix+vids[0].filename));
-    else for (const v of vids) out.push(buildNewRow(header.length,idx,boolCase,`Animation - ${v.num}`,'Animation',prefix+v.filename));
-    for (const ra of d.VID_RA) out.push(buildNewRow(header.length,idx,boolCase,'Read Aloud','Read aloud',prefix+ra.filename));
-    d.AC.forEach((ac,i)=>{
-      const label = opts.renumberSequential ? `Interactivity - ${i+1}` : `Interactivity - ${ac.num}`;
-      out.push(buildNewRow(header.length,idx,boolCase,label,'Activity',interactivityUrl(prefix,ac.filename)));
-    });
-  }
-
-  function insertWorkBookAssetRows(out, d){
-    const vids = d.WB_VID;
-    if (vids.length===1) out.push(buildNewRow(header.length,idx,boolCase,'WB Animation','Animation',prefix+vids[0].filename,{isWorkBook:true}));
-    else for (const v of vids) out.push(buildNewRow(header.length,idx,boolCase,`WB Animation - ${v.num}`,'Animation',prefix+v.filename,{isWorkBook:true}));
-    for (const ra of d.WB_VID_RA) out.push(buildNewRow(header.length,idx,boolCase,'WB Read Aloud','Read aloud',prefix+ra.filename,{isWorkBook:true}));
-    d.WB_AC.forEach((ac,i)=>{
-      const label = opts.renumberSequential ? `WB Interactivity - ${i+1}` : `WB Interactivity - ${ac.num}`;
-      out.push(buildNewRow(header.length,idx,boolCase,label,'Activity',interactivityUrl(prefix,ac.filename),{isWorkBook:true}));
-    });
-  }
-
-  function hasWBAssets(d){ return d.WB_AC.length || d.WB_VID.length || d.WB_VID_RA.length; }
-  function hasCourseAssets(d){ return d.AC.length || d.VID.length || d.VID_RA.length; }
-
   const out = [header];
   let currentChapter = null;
   const inserted = new Set();
-  const stats = { chaptersMatched:0, chaptersCourseBookAdded:0, chaptersWorkBookAdded:0, chaptersNoAssets:[], chapterDetail:{} };
-
+  const stats = { chaptersMatched:0, chaptersNoAssets:[], chapterDetail:{} };
   for (let r=1;r<csvRows.length;r++){
     const row = csvRows[r];
     out.push(row);
     if ((row[idx.rowType]||'').trim()==='chapter'){
       currentChapter = parseInt(row[idx.sequence],10);
-      // Chapter has no existing Course Book anchor: create one here (plus any other matched assets) if we have data for it
-      if (!hasCourseBook.has(currentChapter) && !inserted.has(currentChapter)){
-        const d = byChapter[currentChapter];
-        if (d && (d.PDF.length || hasCourseAssets(d) || d.WB_PDF.length || hasWBAssets(d))){
-          stats.chaptersMatched++;
-          if (d.PDF.length){
-            out.push(buildNewRow(header.length,idx,boolCase,'Course Book','Pdf File',pdfPrefix+d.PDF[0].filename,{isCourseBook:true}));
-            stats.chaptersCourseBookAdded++;
-          }
-          insertChapterAssetRows(out, d);
-          if ((d.WB_PDF.length || hasWBAssets(d)) && !hasWorkBook.has(currentChapter)){
-            if (d.WB_PDF.length){
-              out.push(buildNewRow(header.length,idx,boolCase,'Work Book','Pdf File',wbPrefix+d.WB_PDF[0].filename,{isWorkBook:true}));
-              stats.chaptersWorkBookAdded++;
-            }
-            insertWorkBookAssetRows(out, d);
-          }
-          stats.chapterDetail[currentChapter] = { courseBookAdded: d.PDF.length>0, workBookAdded: d.WB_PDF.length>0 && !hasWorkBook.has(currentChapter), animations: d.VID.length, readAloud: d.VID_RA.length, interactivities: d.AC.length, acNums: d.AC.map(a=>a.num), wbInteractivities: d.WB_AC.length };
-          inserted.add(currentChapter);
-        } else {
-          stats.chaptersNoAssets.push(currentChapter);
-        }
-      }
     } else if ((row[idx.rowType]||'').trim()==='chapter_assets' && (row[idx.name]||'').trim()==='Course Book' && currentChapter!=null && !inserted.has(currentChapter)){
       const d = byChapter[currentChapter];
-      const wbNeeded = (d && (d.WB_PDF.length || hasWBAssets(d))) && !hasWorkBook.has(currentChapter);
-      if (d && (hasCourseAssets(d) || wbNeeded)){
+      if (d){
         stats.chaptersMatched++;
-        insertChapterAssetRows(out, d);
-        if (wbNeeded){
-          if (d.WB_PDF.length){
-            out.push(buildNewRow(header.length,idx,boolCase,'Work Book','Pdf File',wbPrefix+d.WB_PDF[0].filename,{isWorkBook:true}));
-            stats.chaptersWorkBookAdded++;
-          }
-          insertWorkBookAssetRows(out, d);
-        }
-        stats.chapterDetail[currentChapter] = { courseBookAdded:false, workBookAdded: wbNeeded && d.WB_PDF.length>0, animations: d.VID.length, readAloud: d.VID_RA.length, interactivities: d.AC.length, acNums: d.AC.map(a=>a.num), wbInteractivities: d.WB_AC.length };
-        inserted.add(currentChapter);
-      } else if (!d) {
+        const vids = d.VID;
+        if (vids.length===1) out.push(buildNewRow(header.length,idx,boolCase,'Animation','Animation',prefix+vids[0].filename));
+        else for (const v of vids) out.push(buildNewRow(header.length,idx,boolCase,`Animation - ${v.num}`,'Animation',prefix+v.filename));
+        for (const ra of d.VID_RA) out.push(buildNewRow(header.length,idx,boolCase,'Read Aloud','Read aloud',prefix+ra.filename));
+        d.AC.forEach((ac,i)=>{
+          const label = opts.renumberSequential ? `Interactivity - ${i+1}` : `Interactivity - ${ac.num}`;
+          out.push(buildNewRow(header.length,idx,boolCase,label,'Activity',prefix+ac.filename));
+        });
+        stats.chapterDetail[currentChapter] = { animations: vids.length, readAloud: d.VID_RA.length, interactivities: d.AC.length, acNums: d.AC.map(a=>a.num) };
+      } else {
         stats.chaptersNoAssets.push(currentChapter);
-        inserted.add(currentChapter);
       }
-      // if d exists but only had a PDF (already has Course Book) and no WB data needed, leave uninserted/unflagged — nothing to add
+      inserted.add(currentChapter);
     }
   }
   return { rows: out, stats, header, idx };
@@ -558,18 +437,6 @@ setupDrop(document.getElementById('dropAssets'), document.getElementById('fileAs
   syncAssetsFromPaste();
 });
 document.getElementById('assetsPaste').addEventListener('input', syncAssetsFromPaste);
-
-const folderBtn = document.getElementById('folderBtn');
-const folderInput = document.getElementById('folderInput');
-folderBtn.addEventListener('click', ()=>folderInput.click());
-folderInput.addEventListener('change', (e)=>{
-  const files = Array.from(e.target.files);
-  if (!files.length) return;
-  const names = files.map(f=>f.name).filter(n=>n && !n.startsWith('.'));
-  document.getElementById('assetsPaste').value = names.join('\n');
-  folderBtn.textContent = `📁 ${names.length} files from folder`;
-  syncAssetsFromPaste();
-});
 function syncAssetsFromPaste(){
   const text = document.getElementById('assetsPaste').value;
   state.assetFilenames = getAssetFilenamesFromText(text);
@@ -600,17 +467,13 @@ document.getElementById('mismatchOverride').addEventListener('change', checkRead
 
 document.getElementById('mergeBtn').addEventListener('click', ()=>{
   const pathPrefix = document.getElementById('pathPrefix').value;
-  const pdfPathPrefix = document.getElementById('pdfPathPrefix').value;
-  const wbPathPrefix = document.getElementById('wbPathPrefix').value || null;
-  const folderStyleInteractivity = document.getElementById('folderStyleInteractivity').checked;
   const renumberSequential = document.querySelector('input[name=numbering]:checked').value === 'sequential';
   const byChapter = groupAssets(state.assetFilenames);
-  const result = mergeAssets(state.targetRows, byChapter, { pathPrefix, pdfPathPrefix, wbPathPrefix, folderStyleInteractivity, renumberSequential });
+  const result = mergeAssets(state.targetRows, byChapter, { pathPrefix, renumberSequential });
   state.mergedRows = result.rows;
 
   document.getElementById('mergeSummary').innerHTML =
-    `<p class="summary-line"><b>${result.stats.chaptersMatched}</b> chapters matched (` +
-    `<b>${result.stats.chaptersCourseBookAdded}</b> new Course Book rows, <b>${result.stats.chaptersWorkBookAdded}</b> new Work Book rows) · rows ${state.targetRows.length-1} → <b>${result.rows.length-1}</b></p>`;
+    `<p class="summary-line"><b>${result.stats.chaptersMatched}</b> chapters matched · rows ${state.targetRows.length-1} → <b>${result.rows.length-1}</b></p>`;
 
   // build chapter shelf, reading original chapter list (name+sequence) from target
   const idx = result.idx;
@@ -628,10 +491,7 @@ document.getElementById('mergeBtn').addEventListener('click', ()=>{
       const hasGap = detail.acNums.length>0 && (detail.acNums[0]!==1 || detail.acNums.some((n,i)=>i>0 && n!==detail.acNums[i-1]+1));
       cls = hasGap ? 'gap' : 'ok';
       pillHtml = hasGap ? '<span class="pill gap">numbering gap</span>' : '<span class="pill ok">matched</span>';
-      if (detail.courseBookAdded) pillHtml += '<span class="pill ok">+ course book</span>';
-      if (detail.workBookAdded) pillHtml += '<span class="pill ok">+ work book</span>';
       counts = `${detail.animations} anim · ${detail.readAloud} read-aloud · ${detail.interactivities} interactivity`;
-      if (detail.wbInteractivities) counts += ` · ${detail.wbInteractivities} WB interactivity`;
     }
     div.className = 'spine '+cls;
     div.innerHTML = `<div class="num">${String(ch.seq).padStart(2,'0')}</div><div class="title">${escapeHtml(ch.name)} ${pillHtml}</div><div class="counts">${counts}</div>`;
